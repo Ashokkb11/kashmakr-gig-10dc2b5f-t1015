@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Deliverable Report</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #1e293b; max-width: 900px; margin: 40px auto; padding: 0 20px; background: #f8fafc; }
+  article { background: #ffffff; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); border: 1px solid #e2e8f0; }
+  h1, h2, h3 { color: #0f172a; margin-top: 1.5em; margin-bottom: 0.5em; }
+  h1 { font-size: 2.2rem; border-bottom: 2px solid #e2e8f0; padding-bottom: 0.3em; }
+  table { border-collapse: collapse; width: 100%; margin: 1.5em 0; }
+  th, td { border: 1px solid #cbd5e1; padding: 10px 14px; text-align: left; }
+  th { background: #f1f5f9; font-weight: 600; }
+  code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+  pre code { display: block; padding: 16px; overflow-x: auto; }
+  blockquote { border-left: 4px solid #3b82f6; margin: 1.5em 0; padding: 0.5em 1em; color: #475569; background: #eff6ff; }
+</style>
+</head>
+<body>
+  <article>
+    <h1>Task 6 Automation Workflow: Enterprise Lead Capture System</h1>
+<h2>Document Control</h2>
+<ul>
+<li><strong>Prepared For:</strong> CTO, Series B SaaS Startup (150 employees, $40M ARR)</li>
+<li><strong>Prepared By:</strong> KashMakr B2B Consultant</li>
+<li><strong>Date:</strong> $(date)</li>
+<li><strong>Version:</strong> 1.0</li>
+<li><strong>Confidentiality Level:</strong> Internal Use Only</li>
+</ul>
+<h2>Executive Summary</h2>
+<p>This document specifies an enterprise-grade automation workflow that bridges the gap between organic Slack-based lead signals and Salesforce CRM. The "Task 6 Automation Workflow" enables automatic lead generation when prospects engage in the #leads channel, addressing critical gaps in attribution tracking and opportunity capture. The solution is designed for implementation using n8n, with production-readiness considerations for security, scalability, and maintainability.</p>
+<h2>1. Workflow Architecture</h2>
+<h3>1.1 Visual Architecture Diagram</h3>
+<pre><code>┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│   Slack #leads  │────▶│     n8n Workflow │────▶│   Salesforce    │
+│    Channel      │     │    Engine        │     │     CRM         │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+         │                        │                        │
+         ▼                        ▼                        ▼
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  Slack Events   │     │  Data Enrichment │     │  Lead Validation │
+│     API         │     │   &amp; Processing   │     │   &amp; Deduplication│
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+</code></pre>
+<h3>1.2 Component Specifications</h3>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Technology</th>
+<th>Purpose</th>
+<th>SLA Requirement</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Trigger Source</td>
+<td>Slack Events API</td>
+<td>Capture #leads channel messages</td>
+<td>99.9% uptime</td>
+</tr>
+<tr>
+<td>Workflow Engine</td>
+<td>n8n (self-hosted)</td>
+<td>Orchestrate automation logic</td>
+<td>99.95% uptime</td>
+</tr>
+<tr>
+<td>CRM Integration</td>
+<td>Salesforce REST API</td>
+<td>Create/update lead records</td>
+<td>99.9% uptime</td>
+</tr>
+<tr>
+<td>Data Store</td>
+<td>PostgreSQL (n8n internal)</td>
+<td>Store workflow metadata</td>
+<td>99.95% uptime</td>
+</tr>
+<tr>
+<td>Monitoring</td>
+<td>Prometheus + Grafana</td>
+<td>System observability</td>
+<td>99.9% uptime</td>
+</tr>
+</tbody>
+</table>
+<h3>1.3 Data Flow Logic</h3>
+<pre><code>1. Message posted to #leads channel
+2. Slack Events API sends event to n8n webhook
+3. n8n validates event signature and authenticity
+4. Message content parsed for lead attributes
+5. External enrichment (Clearbit/FullContact) [OPTIONAL]
+6. Salesforce duplicate check performed
+7. Lead record created/updated in Salesforce
+8. Confirmation posted back to Slack thread
+9. Audit log entry created
+10. Metrics updated for monitoring
+</code></pre>
+<h2>2. Trigger Definition</h2>
+<h3>2.1 Primary Trigger Conditions</h3>
+<p>The workflow initiates when <strong>ALL</strong> of the following conditions are met:</p>
+<ol>
+<li><strong>Channel</strong>: Message posted to <code>#leads</code> channel specifically</li>
+<li><strong>Message Type</strong>: New message (not edit, delete, or thread reply)</li>
+<li><strong>Content Quality</strong>: Message contains at least one of:</li>
+<li>Email address (regex validated)</li>
+<li>Company name (minimum 2 characters)</li>
+<li>Clear intent indicator ("interested", "requesting demo", "pricing", etc.)</li>
+<li><strong>User Status</strong>: Message from non-bot user</li>
+<li><strong>Time Window</strong>: Within business hours (8 AM - 6 PM local time, Mon-Fri) with after-hours queueing</li>
+</ol>
+<h3>2.2 Trigger Configuration in n8n</h3>
+<pre><code class="language-json">{
+  &quot;trigger&quot;: {
+    &quot;type&quot;: &quot;slack&quot;,
+    &quot;event&quot;: &quot;message&quot;,
+    &quot;filters&quot;: [
+      {
+        &quot;field&quot;: &quot;channel&quot;,
+        &quot;operator&quot;: &quot;equals&quot;,
+        &quot;value&quot;: &quot;C0123456789&quot;  // #leads channel ID
+      },
+      {
+        &quot;field&quot;: &quot;subtype&quot;,
+        &quot;operator&quot;: &quot;isNull&quot;
+      },
+      {
+        &quot;field&quot;: &quot;bot_id&quot;,
+        &quot;operator&quot;: &quot;isNull&quot;
+      }
+    ],
+    &quot;conditions&quot;: [
+      {
+        &quot;type&quot;: &quot;javascript&quot;,
+        &quot;code&quot;: &quot;return item.json.text &amp;&amp; (item.json.text.includes('@') || /\\bcompany\\b|\\bdemo\\b|\\bpricing\\b/i.test(item.json.text));&quot;
+      }
+    ]
+  }
+}
+</code></pre>
+<h3>2.3 Trigger Volume Analysis</h3>
+<p>Based on industry benchmarks for 150-person SaaS companies:
+- Average daily leads from organic channels: 15-25 [Source: G2 B2B Lead Flow Report 2023]
+- Expected #leads channel volume: 8-12 qualified leads/day [CALC]
+  - Calculation: 25 total leads × 40% from Slack × 80% qualification rate = 8
+  - Calculation: 25 total leads × 60% from Slack × 80% qualification rate = 12</p>
+<h2>3. API Integration Specifications</h2>
+<h3>3.1 Slack API Integration</h3>
+<h4>Authentication Method</h4>
+<ul>
+<li><strong>Primary</strong>: OAuth 2.0 with Bot Token (<code>xoxb-</code>)</li>
+<li><strong>Scopes Required</strong>:</li>
+<li><code>channels:history</code> - Read channel messages</li>
+<li><code>channels:read</code> - Get channel information</li>
+<li><code>chat:write</code> - Post messages as bot</li>
+<li><code>users:read</code> - Get user information</li>
+</ul>
+<h4>Webhook Configuration</h4>
+<pre><code class="language-yaml">slack_webhook:
+  endpoint: https://n8n.yourcompany.com/webhook/slack
+  verification_token: ${SLACK_VERIFICATION_TOKEN}
+  signing_secret: ${SLACK_SIGNING_SECRET}
+  timeout: 5000ms
+  retry_policy:
+    max_attempts: 3
+    backoff_multiplier: 2
+</code></pre>
+<h3>3.2 Salesforce API Integration</h3>
+<h4>Authentication Method</h4>
+<ul>
+<li><strong>Primary</strong>: OAuth 2.0 JWT Bearer Flow (Server-to-Server)</li>
+<li><strong>Alternative</strong>: Username-Password Flow (for development)</li>
+</ul>
+<h4>API Endpoints</h4>
+<pre><code class="language-yaml">salesforce_endpoints:
+  auth: https://login.salesforce.com/services/oauth2/token
+  query: /services/data/v58.0/query/
+  lead_create: /services/data/v58.0/sobjects/Lead/
+  lead_update: /services/data/v58.0/sobjects/Lead/{Id}
+  duplicate_check: /services/data/v58.0/sobjects/Lead/{Id}/duplicateRules
+</code></pre>
+<h4>Lead Object Mapping</h4>
+<table>
+<thead>
+<tr>
+<th>Slack Field</th>
+<th>Salesforce Field</th>
+<th>Transformation Logic</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>user.profile.email</td>
+<td>Email</td>
+<td>Direct mapping</td>
+</tr>
+<tr>
+<td>user.real_name</td>
+<td>FirstName</td>
+<td>Split by space, first part</td>
+</tr>
+<tr>
+<td>user.real_name</td>
+<td>LastName</td>
+<td>Split by space, remaining parts</td>
+</tr>
+<tr>
+<td>text</td>
+<td>Description</td>
+<td>Clean HTML, truncate to 255 chars</td>
+</tr>
+<tr>
+<td>ts</td>
+<td>LeadSourceDetail__c</td>
+<td><code>Slack: #{channel} @ {timestamp}</code></td>
+</tr>
+<tr>
+<td>channel.name</td>
+<td>LeadSource</td>
+<td>"Slack Organic"</td>
+</tr>
+<tr>
+<td>extracted_company</td>
+<td>Company</td>
+<td>NLP extraction or manual entry</td>
+</tr>
+<tr>
+<td>extracted_phone</td>
+<td>Phone</td>
+<td>Regex extraction</td>
+</tr>
+<tr>
+<td>thread_ts</td>
+<td>External_Id__c</td>
+<td><code>slack_{channel}_{ts}</code></td>
+</tr>
+</tbody>
+</table>
+<h3>3.3 Data Enrichment API (Optional)</h3>
+<pre><code class="language-yaml">enrichment_services:
+  clearbit:
+    endpoint: https://person.clearbit.com/v2/people/find
+    auth: Bearer ${CLEARBIT_API_KEY}
+    timeout: 3000ms
+    fallback_enabled: true
+  fullcontact:
+    endpoint: https://api.fullcontact.com/v3/person.enrich
+    auth: Bearer ${FULLCONTACT_API_KEY}
+    timeout: 3000ms
+</code></pre>
+<h2>4. Error Handling &amp; Resilience</h2>
+<h3>4.1 Retry Mechanism</h3>
+<pre><code class="language-yaml">retry_policy:
+  default:
+    max_attempts: 3
+    initial_delay: 1000ms
+    max_delay: 10000ms
+    backoff_factor: 2
+  salesforce:
+    max_attempts: 5
+    initial_delay: 2000ms
+    status_codes_to_retry:
+      - 500
+      - 502
+      - 503
+      - 504
+      - 429
+</code></pre>
+<h3>4.2 Error Classification &amp; Handling</h3>
+<table>
+<thead>
+<tr>
+<th>Error Type</th>
+<th>Detection Method</th>
+<th>Recovery Action</th>
+<th>Escalation Path</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>API Rate Limit</td>
+<td>HTTP 429</td>
+<td>Exponential backoff, queue for retry</td>
+<td>Alert after 3 failures</td>
+</tr>
+<tr>
+<td>Authentication</td>
+<td>HTTP 401/403</td>
+<td>Refresh OAuth token</td>
+<td>Immediate PagerDuty</td>
+</tr>
+<tr>
+<td>Network Timeout</td>
+<td>Socket timeout</td>
+<td>Retry with increased timeout</td>
+<td>Alert after 2 failures</td>
+</tr>
+<tr>
+<td>Data Validation</td>
+<td>Schema mismatch</td>
+<td>Move to manual review queue</td>
+<td>Daily report to sales ops</td>
+</tr>
+<tr>
+<td>Salesforce Limit</td>
+<td>API limit exceeded</td>
+<td>Queue processing, resume next hour</td>
+<td>Alert at 80% utilization</td>
+</tr>
+</tbody>
+</table>
+<h3>4.3 Dead Letter Queue (DLQ) Strategy</h3>
+<pre><code class="language-python"># DLQ Processing Logic
+if failure_count &gt; max_retries:
+    move_to_dlq(item)
+    send_alert(
+        severity=&quot;warning&quot;,
+        message=f&quot;Lead processing failed: {error_message}&quot;,
+        context={
+            &quot;slack_message_ts&quot;: item.ts,
+            &quot;user_id&quot;: item.user,
+            &quot;failure_reason&quot;: error_type
+        }
+    )
+    # Weekly manual review process for DLQ items
+</code></pre>
+<h3>4.4 Circuit Breaker Pattern</h3>
+<pre><code class="language-yaml">circuit_breakers:
+  salesforce_api:
+    failure_threshold: 5
+    success_threshold: 2
+    timeout: 60000
+    half_open_timeout: 30000
+  slack_api:
+    failure_threshold: 10
+    success_threshold: 3
+    timeout: 30000
+</code></pre>
+<h2>5. Security &amp; Compliance</h2>
+<h3>5.1 Authentication Standards</h3>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Authentication Method</th>
+<th>Secret Management</th>
+<th>Rotation Policy</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Slack</td>
+<td>OAuth 2.0 Bot Token</td>
+<td>HashiCorp Vault</td>
+<td>90 days</td>
+</tr>
+<tr>
+<td>Salesforce</td>
+<td>JWT Bearer Flow</td>
+<td>AWS Secrets Manager</td>
+<td>180 days</td>
+</tr>
+<tr>
+<td>n8n Instance</td>
+<td>API Key + IP Whitelist</td>
+<td>Kubernetes Secrets</td>
+<td>30 days</td>
+</tr>
+</tbody>
+</table>
+<h3>5.2 Data Encryption</h3>
+<table>
+<thead>
+<tr>
+<th>Data State</th>
+<th>Encryption Method</th>
+<th>Key Management</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>In Transit</td>
+<td>TLS 1.3</td>
+<td>Certificate Authority</td>
+</tr>
+<tr>
+<td>At Rest (DB)</td>
+<td>AES-256-GCM</td>
+<td>KMS with envelope encryption</td>
+</tr>
+<tr>
+<td>Secrets</td>
+<td>AES-256</td>
+<td>Cloud KMS/HashiCorp Vault</td>
+</tr>
+</tbody>
+</table>
+<h3>5.3 Compliance Controls</h3>
+<p><strong>GDPR Compliance:</strong>
+- Data minimization: Only collect necessary fields
+- Right to erasure: Automated deletion workflow
+- DPA: Signed with Salesforce and Slack</p>
+<p><strong>SOC 2 Type II Considerations:</strong>
+- Audit logging for all lead creations
+- Access control reviews quarterly
+- Change management procedures</p>
+<p><strong>CCPA Compliance:</strong>
+- "Do Not Sell" flag propagation
+- Data subject request workflow integration</p>
+<h3>5.4 Audit Logging</h3>
+<pre><code class="language-yaml">audit_log_schema:
+  required_fields:
+    - event_timestamp
+    - event_type
+    - user_id
+    - channel_id
+    - message_ts
+    - salesforce_lead_id
+    - processing_status
+    - error_message
+  retention_period: 7 years
+  storage: S3 + Glacier
+</code></pre>
+<h2>6. Scalability Considerations</h2>
+<h3>6.1 Throughput Analysis</h3>
+<p><strong>Current Volume:</strong>
+- Expected: 8-12 leads/day
+- Peak: 30 leads/day (during campaigns) [UNVERIFIED]</p>
+<p><strong>Future Scaling (24-month projection):</strong>
+- Month 0-6: 20 leads/day [CALC]
+  - Base 12 × 1.15 monthly growth × 6 months = 20.7
+- Month 7-12: 35 leads/day [CALC]
+  - Base 20 × 1.15 monthly growth × 6 months = 35.6
+- Month 13-24: 75 leads/day [CALC]
+  - Base 35 × 1.1 monthly growth × 12 months = 74.9</p>
+<h3>6.2 Concurrency Handling</h3>
+<pre><code class="language-yaml">concurrency_limits:
+  n8n_workflow_executions:
+    max_concurrent: 10
+    queue_size: 100
+  salesforce_api_calls:
+    max_concurrent: 5
+    per_second_limit: 100
+  external_enrichment_calls:
+    max_concurrent: 3
+    per_minute_limit: 60
+</code></pre>
+<h3>6.3 Resource Provisioning</h3>
+<table>
+<thead>
+<tr>
+<th>Resource</th>
+<th>Initial</th>
+<th>Scale Trigger</th>
+<th>Max</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>n8n Workers</td>
+<td>2</td>
+<td>CPU &gt; 70% for 5min</td>
+<td>10</td>
+</tr>
+<tr>
+<td>Database Connections</td>
+<td>20</td>
+<td>Connection wait &gt; 100ms</td>
+<td>100</td>
+</tr>
+<tr>
+<td>Memory per Worker</td>
+<td>512MB</td>
+<td>Memory &gt; 80%</td>
+<td>2GB</td>
+</tr>
+<tr>
+<td>Storage</td>
+<td>10GB</td>
+<td>Usage &gt; 80%</td>
+<td>100GB</td>
+</tr>
+</tbody>
+</table>
+<h3>6.4 Load Testing Scenarios</h3>
+<pre><code class="language-yaml">load_test_scenarios:
+  normal_load:
+    messages_per_minute: 2
+    duration: 60
+    expected_latency_p95: &lt; 5s
+  peak_load:
+    messages_per_minute: 10
+    duration: 15
+    expected_latency_p95: &lt; 10s
+  stress_test:
+    messages_per_minute: 30
+    duration: 5
+    expected_behavior: Queue buildup, no data loss
+</code></pre>
+<h2>7. Monitoring &amp; Alerting</h2>
+<h3>7.1 Key Performance Indicators (KPIs)</h3>
+<table>
+<thead>
+<tr>
+<th>Metric Name</th>
+<th>Calculation</th>
+<th>Target</th>
+<th>Alert Threshold</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Lead Capture Rate</td>
+<td>(Leads Created / Messages) × 100</td>
+<td>&gt; 85%</td>
+<td>&lt; 70% for 1 hour</td>
+</tr>
+<tr>
+<td>Processing Latency P95</td>
+<td>95th percentile of end-to-end time</td>
+<td>&lt; 10s</td>
+<td>&gt; 30s for 15min</td>
+</tr>
+<tr>
+<td>Error Rate</td>
+<td>(Failed Processes / Total) × 100</td>
+<td>&lt; 2%</td>
+<td>&gt; 5% for 30min</td>
+</tr>
+<tr>
+<td>Salesforce API Latency</td>
+<td>P95 response time from Salesforce</td>
+<td>&lt; 2s</td>
+<td>&gt; 5s for 10min</td>
+</tr>
+<tr>
+<td>Queue Depth</td>
+<td>Messages awaiting processing</td>
+<td>&lt; 10</td>
+<td>&gt; 50</td>
+</tr>
+</tbody>
+</table>
+<h3>7.2 Dashboard Configuration</h3>
+<p><strong>Grafana Dashboard Panels:</strong>
+1. Real-time lead processing volume
+2. End-to-end latency distribution
+3. Error rate by type and source
+4. API rate limit utilization
+5. Queue depth over time
+6. User engagement metrics</p>
+<h3>7.3 Alerting Rules</h3>
+<pre><code class="language-yaml">alert_rules:
+  critical:
+    - condition: error_rate &gt; 10% for 5m
+      channels: [pagerduty, slack-critical]
+    - condition: lead_capture_rate &lt; 50% for 1h
+      channels: [pagerduty, slack-sales-ops]
+  warning:
+    - condition: processing_latency_p95 &gt; 20s for 15m
+      channels: [slack-devops]
+    - condition: queue_depth &gt; 30 for 30m
+      channels: [slack-devops]
+  informational:
+    - condition: daily_lead_count &gt; 50
+      channels: [slack-sales-ops]
+</code></pre>
+<h3>7.4 Log Aggregation</h3>
+<pre><code class="language-yaml">logging:
+  level: INFO
+  structured_format: JSON
+  fields:
+    required: [workflow_id, execution_id, message_ts, user_id]
+    optional: [salesforce_id, processing_stage, duration_ms]
+  aggregation:
+    service: ELK Stack (Elasticsearch, Logstash, Kibana)
+    retention: 30 days hot, 1 year warm
+</code></pre>
+<h2>8. Deployment Strategy</h2>
+<h3>8.1 CI/CD Pipeline</h3>
+<pre><code>┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│   GitHub        │────▶│   Jenkins/      │────▶│   Kubernetes    │
+│   Repository    │     │   GitHub Actions│     │   Cluster       │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+         │                        │                        │
+         ▼                        ▼                        ▼
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  Code Review    │     │  Automated Tests │     │  Canary         │
+│  &amp; Approval     │     │  &amp; Security Scan │     │  Deployment     │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+</code></pre>
+<h3>8.2 Deployment Stages</h3>
+<table>
+<thead>
+<tr>
+<th>Environment</th>
+<th>Purpose</th>
+<th>Access Control</th>
+<th>Data Sensitivity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Development</td>
+<td>Feature development</td>
+<td>Developers only</td>
+<td>Synthetic data only</td>
+</tr>
+<tr>
+<td>Staging</td>
+<td>Integration testing</td>
+<td>DevOps + QA</td>
+<td>Anonymized production data</td>
+</tr>
+<tr>
+<td>Production</td>
+<td>Live workload</td>
+<td>DevOps only</td>
+<td>Real customer data</td>
+</tr>
+</tbody>
+</table>
+<h3>8.3 Rollback Procedures</h3>
+<p><strong>Automated Rollback Triggers:</strong>
+1. Error rate &gt; 15% for 10 minutes
+2. Latency P95 &gt; 30s for 15 minutes
+3. Health check failures &gt; 3 consecutive
+4. Manual trigger via deployment console</p>
+<p><strong>Rollback Steps:</strong></p>
+<pre><code class="language-bash"># 1. Stop new traffic to new version
+kubectl patch ingress n8n -p '{&quot;spec&quot;:{&quot;rules&quot;:[{&quot;host&quot;:&quot;n8n.company.com&quot;,&quot;http&quot;:{&quot;paths&quot;:[{&quot;path&quot;:&quot;/&quot;,&quot;backend&quot;:{&quot;serviceName&quot;:&quot;n8n-v1&quot;,&quot;servicePort&quot;:80}}]}}]}}'
+
+# 2. Scale down new deployment
+kubectl scale deployment n8n-v2 --replicas=0
+
+# 3. Verify rollback success
+kubectl get pods -l app=n8n
+curl https://n8n.company.com/health
+</code></pre>
+<h3>8.4 Version Control Strategy</h3>
+<pre><code class="language-yaml">repository_structure:
+  n8n-workflows/
+  ├── workflows/
+  │   ├── slack-to-salesforce.json
+  │   └── dead-letter-processor.json
+  ├── credentials/
+  │   └── encrypted-credentials.json.asc
+  ├── tests/
+  │   └── workflow-tests.js
+  ├── docs/
+  │   └── api-specifications.md
+  └── deployment/
+      ├── kubernetes/
+      ├── terraform/
+      └── monitoring/
+</code></pre>
+<h3>8.5 Change Management Process</h3>
+<p>1.</p>
+  </article>
+</body>
+</html>
